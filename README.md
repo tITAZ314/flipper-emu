@@ -19,7 +19,7 @@ mailbox.
 | `.dfu` loader (DfuSe, including Flipper's variant layout) | **done** — 14 tests, verified byte-for-byte against the official 1.4.3 package |
 | Flash image assembly + persistence across runs | **done** — 1 MiB image, dumped on exit, guarded so a failed run cannot destroy it |
 | STM32WB55 platform description | **done** — 50 register blocks, 57 instances, loads cleanly in Renode 1.17 |
-| Real firmware executes | **yes** — the 1.4.3 bootloader reads its buttons as released, starts the application, and Furi brings up RTC/interrupts/resources/SPI/iButton/speaker/crypto/I2C/power/BT and reaches "Boot mode 0, starting services" with **zero** crashes |
+| Real firmware executes | **yes** — the application boots cold (this `.dfu` is app-only, no bootloader — see Next Steps), GPIO/HSEM models supply what the bootloader would normally provide, and Furi brings up RTC/interrupts/resources/SPI/iButton/speaker/crypto/I2C/power/BT, reaching "Boot mode 0, starting services" with **zero** crashes |
 | Custom C# peripheral models | **yes** — `Wb55Exti`, `GpioWb55Port` (GPIO with a real input path), `HsemWb55` (hardware semaphores) and `St7567Display` load as a Renode plugin; recipe in `peripherals/cs/README.md` |
 | Boots to the home screen | **reached** — the application runs, the GUI starts and the panel is drawn (Desktop idle animation; see `docs/BRINGUP_LOG.md` §18). Remaining errors are the absent chips: gauge, Sub-GHz, NFC and the CPU2/wireless stack |
 | Button input | **done** — injected levels drive polled reads (boot-time board levels from `flipper_zero.resc`) and EXTI-driven presses come from the UI / monitor |
@@ -104,7 +104,7 @@ The project keeps four boundaries, so each layer can be changed or tested alone:
 | `flipper_emu.platform` | **Bus/platform**: renders the Renode `.repl`/`.resc` from that address map |
 | `flipper_emu.peripherals` | **Peripheral models**: IronPython 2.7 register models (`python/`) and C# bus devices (`cs/`, display + SD card) |
 | `flipper_emu.console` | **Debug console**: turns a Renode log into the bring-up digest (unimplemented registers, unmapped accesses, boot loops, faults) |
-| `flipper_emu.frontend` | **UI/rendering** (planned): 128×64 framebuffer window with key→button mapping |
+| `flipper_emu.frontend` | **UI/rendering**: 128×64 framebuffer window with key→button mapping (`ui_tk.py`) |
 | `flipper_emu.runner` / `cli.py` | Session orchestration and the command line |
 
 Design rules that keep it honest:
@@ -123,6 +123,7 @@ Design rules that keep it honest:
   back on exit, so settings and OTA behaviour survive runs, like the real chip.
 
 ---
+
 
 ## Supported firmware and files
 
@@ -163,6 +164,14 @@ Design rules that keep it honest:
 3. SD card and external SPI flash (W25Q64) emulation.
 4. Verify a second, independently-built firmware version boots with no manual
    tuning, as the real test of firmware-agnostic support.
+   
+---
+
+> **Development note:** built with heavy use of AI coding assistance
+> (Deepseek V4.1 / Claude) for implementation, debugging, and documentation,
+> under my direction and review throughout. The engineering approach and
+> every decision were mine; AI was a tool in the process. Disclosed here
+> for transparency.
 
 ## License
 

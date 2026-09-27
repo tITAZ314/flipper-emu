@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    C# peripheral models for the emulated Flipper Zero.
+
+    These exist for the cases a Python peripheral cannot cover: bus-attached
+    devices and GPIO consumers/producers (the .repl wires GPIO ports into EXTI,
+    and EXTI into the NVIC, which requires real IGPIO plumbing).
+
+    Build (Renode's assemblies are the compile-time reference and must match the
+    runtime, so the target framework tracks the Renode build):
+
+        dotnet build -c Release -p:RenodeDir=C:\path\to\tools\renode
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>FlipperEmu.Peripherals</AssemblyName>
+    <RootNamespace>FlipperEmu.Peripherals</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- The Renode assemblies are net8.0; keep the runtime reference in step. -->
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Default to the vendored Renode installed by tools/fetch_renode.ps1. -->
+    <RenodeDir Condition="'$(RenodeDir)' == '' AND '$(RENODE_DIR)' != ''">$(RENODE_DIR)</RenodeDir>
+    <RenodeDir Condition="'$(RenodeDir)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..\tools\renode'))</RenodeDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Infrastructure">
+      <HintPath>$(RenodeDir)\Infrastructure.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CheckRenodeDir" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(RenodeDir)\Infrastructure.dll')"
+           Text="Infrastructure.dll not found in '$(RenodeDir)'. Run tools/fetch_renode.ps1 or pass -p:RenodeDir=&lt;renode install&gt;." />
+  </Target>
+
+</Project>

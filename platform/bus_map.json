@@ -1,0 +1,543 @@
+{
+  "regions": [
+    {
+      "name": "flash",
+      "start": 134217728,
+      "size": 1048576,
+      "kind": "flash"
+    },
+    {
+      "name": "sram1",
+      "start": 536870912,
+      "size": 196608,
+      "kind": "ram"
+    },
+    {
+      "name": "sram2a",
+      "start": 537067520,
+      "size": 32768,
+      "kind": "ram"
+    },
+    {
+      "name": "sram2b",
+      "start": 537100288,
+      "size": 32768,
+      "kind": "ram"
+    },
+    {
+      "name": "sysinfo",
+      "start": 536805376,
+      "size": 32768,
+      "kind": "rom"
+    },
+    {
+      "name": "option-bytes",
+      "start": 536838144,
+      "size": 4096,
+      "kind": "option-bytes"
+    }
+  ],
+  "peripherals": [
+    {
+      "name": "TIM2",
+      "base": 1073741824,
+      "size": 1024,
+      "end": 1073742848,
+      "model": "Timers.STM32_Timer",
+      "stub": null,
+      "note": "IR carrier / RFID timing",
+      "status": "modelled"
+    },
+    {
+      "name": "RTC_BACKUP",
+      "base": 1073750016,
+      "size": 1024,
+      "end": 1073751040,
+      "model": null,
+      "stub": "rtc_wb55",
+      "note": "firmware's RTC + BKPxR bank",
+      "status": "stubbed"
+    },
+    {
+      "name": "LCD",
+      "base": 1073751040,
+      "size": 1024,
+      "end": 1073752064,
+      "model": null,
+      "stub": "lcd_wb55",
+      "note": "glass LCD driver, unused by Flipper",
+      "status": "stubbed"
+    },
+    {
+      "name": "RTC",
+      "base": 1073752064,
+      "size": 1024,
+      "end": 1073753088,
+      "model": "Timers.STM32F4_RTC",
+      "stub": null,
+      "note": "AlarmIRQ/WakeupIRQ -> EXTI",
+      "status": "modelled"
+    },
+    {
+      "name": "WWDG",
+      "base": 1073753088,
+      "size": 1024,
+      "end": 1073754112,
+      "model": null,
+      "stub": "wwdg_stub",
+      "note": "",
+      "status": "stubbed"
+    },
+    {
+      "name": "IWDG",
+      "base": 1073754112,
+      "size": 1024,
+      "end": 1073755136,
+      "model": "Timers.STM32_IndependentWatchdog",
+      "stub": null,
+      "note": "frequency 32000",
+      "status": "modelled"
+    },
+    {
+      "name": "SPI2",
+      "base": 1073756160,
+      "size": 1024,
+      "end": 1073757184,
+      "model": "SPI.STM32SPI",
+      "stub": null,
+      "note": "microSD in SPI mode",
+      "status": "modelled"
+    },
+    {
+      "name": "I2C1",
+      "base": 1073763328,
+      "size": 1024,
+      "end": 1073764352,
+      "model": "I2C.STM32F7_I2C",
+      "stub": null,
+      "note": "bq27220 gauge / bq25896 charger (absent -> fast NAK)",
+      "status": "modelled"
+    },
+    {
+      "name": "I2C3",
+      "base": 1073765376,
+      "size": 1024,
+      "end": 1073766400,
+      "model": "I2C.STM32F7_I2C",
+      "stub": null,
+      "note": "vibro driver LP5562",
+      "status": "modelled"
+    },
+    {
+      "name": "CRS",
+      "base": 1073766400,
+      "size": 1024,
+      "end": 1073767424,
+      "model": null,
+      "stub": "crs_stub",
+      "note": "",
+      "status": "stubbed"
+    },
+    {
+      "name": "USB1",
+      "base": 1073768448,
+      "size": 1024,
+      "end": 1073769472,
+      "model": null,
+      "stub": "usb_stub",
+      "note": "USB CDC console; not needed to boot",
+      "status": "stubbed"
+    },
+    {
+      "name": "LPTIM1",
+      "base": 1073773568,
+      "size": 1024,
+      "end": 1073774592,
+      "model": "Timers.STM32L0_LpTimer",
+      "stub": null,
+      "note": "tickless-idle wakeup timer",
+      "status": "modelled"
+    },
+    {
+      "name": "LPUART1",
+      "base": 1073774592,
+      "size": 1024,
+      "end": 1073775616,
+      "model": "UART.STM32F7_USART",
+      "stub": null,
+      "note": "",
+      "status": "modelled"
+    },
+    {
+      "name": "LPTIM2",
+      "base": 1073779712,
+      "size": 1024,
+      "end": 1073780736,
+      "model": "Timers.STM32L0_LpTimer",
+      "stub": null,
+      "note": "",
+      "status": "modelled"
+    },
+    {
+      "name": "SYSCFG",
+      "base": 1073807360,
+      "size": 32,
+      "end": 1073807392,
+      "model": null,
+      "stub": "syscfg_wb55",
+      "note": "EXTICR line routing + MEMRMP remap (OTA)",
+      "status": "stubbed"
+    },
+    {
+      "name": "VREFBUF",
+      "base": 1073807408,
+      "size": 4,
+      "end": 1073807412,
+      "model": null,
+      "stub": "vrefbuf_stub",
+      "note": "",
+      "status": "stubbed"
+    },
+    {
+      "name": "COMP1",
+      "base": 1073807872,
+      "size": 4,
+      "end": 1073807876,
+      "model": null,
+      "stub": "comp_wb55",
+      "note": "125 kHz RFID demodulator",
+      "status": "stubbed"
+    },
+    {
+      "name": "COMP2",
+      "base": 1073807876,
+      "size": 4,
+      "end": 1073807880,
+      "model": null,
+      "stub": "comp_wb55",
+      "note": "125 kHz RFID demodulator",
+      "status": "stubbed"
+    },
+    {
+      "name": "TIM1",
+      "base": 1073818624,
+      "size": 1024,
+      "end": 1073819648,
+      "model": "Timers.STM32_Timer",
+      "stub": null,
+      "note": "IR / RFID carrier",
+      "status": "modelled"
+    },
+    {
+      "name": "SPI1",
+      "base": 1073819648,
+      "size": 1024,
+      "end": 1073820672,
+      "model": "SPI.STM32SPI",
+      "stub": null,
+      "note": "display, SubGHz (CC1101), NFC (ST25R3916)",
+      "status": "modelled"
+    },
+    {
+      "name": "USART1",
+      "base": 1073821696,
+      "size": 1024,
+      "end": 1073822720,
+      "model": "UART.STM32F7_USART",
+      "stub": null,
+      "note": "debug console output",
+      "status": "modelled"
+    },
+    {
+      "name": "TIM16",
+      "base": 1073824768,
+      "size": 1024,
+      "end": 1073825792,
+      "model": "Timers.STM32_Timer",
+      "stub": null,
+      "note": "",
+      "status": "modelled"
+    },
+    {
+      "name": "TIM17",
+      "base": 1073825792,
+      "size": 1024,
+      "end": 1073826816,
+      "model": "Timers.STM32_Timer",
+      "stub": null,
+      "note": "vibro PWM",
+      "status": "modelled"
+    },
+    {
+      "name": "SAI1",
+      "base": 1073828864,
+      "size": 1024,
+      "end": 1073829888,
+      "model": null,
+      "stub": "sai_stub",
+      "note": "I2S speaker, unused",
+      "status": "stubbed"
+    },
+    {
+      "name": "DMA1",
+      "base": 1073872896,
+      "size": 1024,
+      "end": 1073873920,
+      "model": "DMA.STM32G0DMA",
+      "stub": null,
+      "note": "SPI/USART transfers",
+      "status": "modelled"
+    },
+    {
+      "name": "DMA2",
+      "base": 1073873920,
+      "size": 1024,
+      "end": 1073874944,
+      "model": "DMA.STM32G0DMA",
+      "stub": null,
+      "note": "",
+      "status": "modelled"
+    },
+    {
+      "name": "DMAMUX1",
+      "base": 1073874944,
+      "size": 1024,
+      "end": 1073875968,
+      "model": null,
+      "stub": "dmamux_stub",
+      "note": "DMA request routing",
+      "status": "stubbed"
+    },
+    {
+      "name": "CRC",
+      "base": 1073885184,
+      "size": 1024,
+      "end": 1073886208,
+      "model": "CRC.STM32_CRC",
+      "stub": null,
+      "note": "resource/flash checksums",
+      "status": "modelled"
+    },
+    {
+      "name": "TSC",
+      "base": 1073889280,
+      "size": 1024,
+      "end": 1073890304,
+      "model": null,
+      "stub": "tsc_stub",
+      "note": "unused",
+      "status": "stubbed"
+    },
+    {
+      "name": "GPIOA",
+      "base": 1207959552,
+      "size": 1024,
+      "end": 1207960576,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port",
+      "stub": null,
+      "note": "display + radio control lines",
+      "status": "modelled"
+    },
+    {
+      "name": "GPIOB",
+      "base": 1207960576,
+      "size": 1024,
+      "end": 1207961600,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port",
+      "stub": null,
+      "note": "buttons, IR, RFID",
+      "status": "modelled"
+    },
+    {
+      "name": "GPIOC",
+      "base": 1207961600,
+      "size": 1024,
+      "end": 1207962624,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port",
+      "stub": null,
+      "note": "SubGHz/NFC chip selects, SD detect",
+      "status": "modelled"
+    },
+    {
+      "name": "GPIOD",
+      "base": 1207962624,
+      "size": 1024,
+      "end": 1207963648,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port",
+      "stub": null,
+      "note": "",
+      "status": "modelled"
+    },
+    {
+      "name": "GPIOE",
+      "base": 1207963648,
+      "size": 1024,
+      "end": 1207964672,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port",
+      "stub": null,
+      "note": "power rails",
+      "status": "modelled"
+    },
+    {
+      "name": "GPIOH",
+      "base": 1207966720,
+      "size": 1024,
+      "end": 1207967744,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port",
+      "stub": null,
+      "note": "32.768 kHz oscillator",
+      "status": "modelled"
+    },
+    {
+      "name": "ADC1",
+      "base": 1342439424,
+      "size": 1024,
+      "end": 1342440448,
+      "model": "Analog.STM32_ADC",
+      "stub": null,
+      "note": "battery / RFID level sensing",
+      "status": "modelled"
+    },
+    {
+      "name": "AES1",
+      "base": 1342570496,
+      "size": 1024,
+      "end": 1342571520,
+      "model": null,
+      "stub": "aes_stub",
+      "note": "",
+      "status": "stubbed"
+    },
+    {
+      "name": "RCC",
+      "base": 1476395008,
+      "size": 1024,
+      "end": 1476396032,
+      "model": null,
+      "stub": "rcc_wb55",
+      "note": "WB55 register map; the L0 model has different offsets and breaks clock-enable read-back",
+      "status": "stubbed"
+    },
+    {
+      "name": "PWR",
+      "base": 1476396032,
+      "size": 1024,
+      "end": 1476397056,
+      "model": null,
+      "stub": "pwr_wb55",
+      "note": "CPU2 boot (C2BOOT) + low power",
+      "status": "stubbed"
+    },
+    {
+      "name": "EXTI",
+      "base": 1476397056,
+      "size": 1024,
+      "end": 1476398080,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.Wb55Exti",
+      "stub": null,
+      "note": "our C# model: the WB55 has IMR1 at 0x80 and RTSR1 at 0x00, which is not Renode's F4 layout",
+      "status": "modelled"
+    },
+    {
+      "name": "IPCC",
+      "base": 1476398080,
+      "size": 1024,
+      "end": 1476399104,
+      "model": null,
+      "stub": "ipcc_wb55",
+      "note": "CPU2 mailbox: handshake auto-answered; shared-SRAM payload not yet synthesised",
+      "status": "stubbed"
+    },
+    {
+      "name": "RNG",
+      "base": 1476399104,
+      "size": 1024,
+      "end": 1476400128,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.RngWb55",
+      "stub": null,
+      "note": "random values for seeds and BLE key material; was a stub returning 1 for every read",
+      "status": "modelled"
+    },
+    {
+      "name": "HSEM",
+      "base": 1476400128,
+      "size": 1024,
+      "end": 1476401152,
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.HsemWb55",
+      "stub": null,
+      "note": "hardware semaphores: furi_hal_bt_init checks the CLK48 semaphore here, so a zero-returning stub fails its furi_check",
+      "status": "modelled"
+    },
+    {
+      "name": "AES2",
+      "base": 1476401152,
+      "size": 1024,
+      "end": 1476402176,
+      "model": null,
+      "stub": "aes_stub",
+      "note": "",
+      "status": "stubbed"
+    },
+    {
+      "name": "PKA",
+      "base": 1476403200,
+      "size": 1024,
+      "end": 1476404224,
+      "model": null,
+      "stub": "pka_stub",
+      "note": "",
+      "status": "stubbed"
+    },
+    {
+      "name": "FLASH",
+      "base": 1476411392,
+      "size": 1024,
+      "end": 1476412416,
+      "model": "MTD.STM32L0_FlashController",
+      "stub": null,
+      "note": "WB55 shares the L0 register layout (KEYR 0x08/SR 0x10/CR 0x14/OPTR 0x20); the model requires an 'eeprom' binding, which we point at the option bytes",
+      "status": "modelled"
+    },
+    {
+      "name": "QUADSPI",
+      "base": 2684358656,
+      "size": 1024,
+      "end": 2684359680,
+      "model": null,
+      "stub": "quadspi_stub",
+      "note": "not used by Flipper Zero",
+      "status": "stubbed"
+    },
+    {
+      "name": "NVIC",
+      "base": 3758153728,
+      "size": 4096,
+      "end": 3758157824,
+      "model": "IRQControllers.NVIC",
+      "stub": null,
+      "note": "SysTick frequency drives firmware timing",
+      "status": "modelled"
+    },
+    {
+      "name": "DWT",
+      "base": 3758100480,
+      "size": 4096,
+      "end": 3758104576,
+      "model": null,
+      "stub": "dwt_fast",
+      "note": "CYCCNT must advance fast: delays are busy-waits",
+      "status": "stubbed"
+    },
+    {
+      "name": "DBGMCU",
+      "base": 3758366720,
+      "size": 1024,
+      "end": 3758367744,
+      "model": null,
+      "stub": "dbgmcu_stub",
+      "note": "",
+      "status": "stubbed"
+    }
+  ],
+  "system_clock_hz": 64000000
+}

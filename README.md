@@ -2,7 +2,8 @@
 
 Runs **real, unmodified Flipper Zero firmware** — the official `.dfu` packages,
 exactly as qFlipper flashes them — on a desktop PC. No hardware, no firmware
-patches, no special build defines.
+patches, no special build defines. VERY EARLY VERSION, MANY THINGS DONT WORK !!!
+
 
 The emulated board is a STM32WB55RG described to [Renode](https://renode.io)
 (MIT), with the peripherals of the real Flipper Zero on top: 128×64 ST7567

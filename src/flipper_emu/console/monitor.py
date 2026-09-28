@@ -18,6 +18,32 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 3456
 
+#: Fragments that mean the monitor refused a command or it failed inside Renode.  A
+#: reply also carries whatever the emulator printed meanwhile, so this stays narrow on
+#: purpose: button injection failing silently is what made "the keys do nothing"
+#: invisible for so long.
+FAILURE_FRAGMENTS = (
+    "Traceback (most recent call last)",
+    "Could not find",
+    "Could not load",
+    "Could not resolve",
+    "Invalid command",
+    "Unrecognized command",
+    "not part of the machine",
+)
+
+
+def check_reply(text: str) -> str:
+    """A short description if the monitor's reply looks like a failure, else ""."""
+    if not text:
+        return ""
+    flattened = " ".join(text.split())
+    for fragment in FAILURE_FRAGMENTS:
+        index = flattened.find(fragment)
+        if index >= 0:
+            return flattened[max(0, index - 60) : index + 100]
+    return ""
+
 
 class MonitorError(Exception):
     """Could not talk to the Renode monitor."""
@@ -79,9 +105,13 @@ class RenodeMonitor:
             raise MonitorError("send failed: %s" % exc)
         return self._drain(wait)
 
-    def send(self, text: str) -> None:
-        """Send one monitor command, ignoring the reply (used for button edges)."""
-        self.command(text, wait=0.0)
+    def send(self, text: str, wait: float = 0.05) -> str:
+        """Send one monitor command and return the reply (used for button edges).
+
+        The reply is what makes a refused command visible: a firmware pin that never
+        changed looks exactly like a key that was never pressed otherwise.
+        """
+        return self.command(text, wait=wait)
 
     def _drain(self, wait: float) -> str:
         chunks: List[str] = []

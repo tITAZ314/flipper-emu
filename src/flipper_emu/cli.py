@@ -75,10 +75,36 @@ def cmd_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def startup_includes(includes, card: bool = False) -> List[str]:
+    """Start-up monitor commands for the ``--card`` and ``--renode-include`` options.
+
+    Both verbs that boot a machine (`run`, `ui`) take these.  Order matters: the
+    platform script is always included first by the runner, and its `start` is what
+    resets peripheral state, so everything that has to be injected into the *running*
+    machine (the card's detect pin, a probe's hooks) comes after it.
+
+    `--card` is not cosmetic: without the card the firmware's storage never mounts, so
+    `storage_file_exists("/int/.slideshow")` is false, the desktop never queues its
+    slideshow scene, and the visible screen is the idle animation.
+    """
+    commands: List[str] = []
+    if card:
+        commands.append(
+            "include @%s"
+            % runner.to_renode_path(
+                os.path.join(
+                    runner.repo_root(), "src", "flipper_emu", "platform", "card_present.resc"
+                )
+            )
+        )
+    for script in includes or ():
+        commands.append("include @%s" % runner.to_renode_path(script))
+    return commands
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     extra_commands = list(args.renode_command or ())
-    for script in args.renode_include or ():
-        extra_commands.append("include @%s" % runner.to_renode_path(script))
+    extra_commands.extend(startup_includes(args.renode_include, card=args.card))
     result = runner.run(
         args.resc,
         seconds=args.seconds,
@@ -114,17 +140,53 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def free_monitor_port(preferred: int, attempts: int = 20) -> int:
+    """The first bindable port at or after ``preferred``.
+
+    Renode's monitor binds this port, and an orphaned Renode - easy to accumulate, and
+    `ui` starts a fresh instance every time - can already hold it.  When that happens
+    the display still works (the panel stream is a file) while every button command
+    goes to the *other* instance, which is indistinguishable from "the keys do
+    nothing".  So pick a port we can actually bind.
+    """
+    import socket
+
+    for candidate in range(preferred, preferred + attempts):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", candidate))
+            return candidate
+        except OSError:
+            continue
+        finally:
+            probe.close()
+    return preferred
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     """Start the emulator, then open the live window (or run the self-test)."""
     from .frontend import ui_tk
 
     stream = os.path.join(runner.repo_root(), "artifacts", "display-stream.bin")
+    monitor_port = free_monitor_port(args.monitor_port)
+    if monitor_port != args.monitor_port:
+        print(
+            "monitor port %d is already in use (another Renode?); using %d instead"
+            % (args.monitor_port, monitor_port)
+        )
     session = None
     if not args.attach:
         session = runner.start_session(
-            args.resc, monitor_port=args.monitor_port, renode_exe=args.renode
+            args.resc,
+            monitor_port=monitor_port,
+            renode_exe=args.renode,
+            extra_commands=startup_includes(args.renode_include, card=args.card),
         )
         print("emulator started (monitor port %d, log %s)" % (session.monitor_port, session.log_path))
+        if args.card:
+            print("microSD card presented: /.int/.slideshow decides the first start")
+        else:
+            print("no card presented (--card): the slideshow gate /int/.slideshow is false")
         print("waiting for the firmware to draw...")
         if not session.wait_for_stream(stream, timeout=args.timeout):
             print("warning: no display stream yet (continuing anyway)", file=sys.stderr)
@@ -135,10 +197,14 @@ def cmd_ui(args: argparse.Namespace) -> int:
         "--host",
         args.host,
         "--monitor-port",
-        str(args.monitor_port),
+        str(monitor_port),
         "--scale",
         str(args.scale),
     ]
+    if session is not None:
+        # The self-test reads this to prove a button press reached the *firmware*,
+        # not just the wire: see ui_tk.selftest.
+        ui_args.extend(["--firmware-log", session.log_path])
     if args.no_buttons:
         ui_args.append("--no-buttons")
     if args.selftest:
@@ -222,6 +288,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="monitor script to load at start-up (repeatable), e.g. an instrumented "
         "probe; expands to 'include @<path>'",
     )
+    run.add_argument(
+        "--card",
+        action="store_true",
+        help="put the microSD card in its slot before the firmware boots "
+        "(src/flipper_emu/platform/card_present.resc). Without it the firmware's "
+        "storage never mounts and /int/.slideshow is missing, so the desktop's "
+        "first-start slideshow never starts",
+    )
     run.set_defaults(func=cmd_run)
 
     report = subparsers.add_parser("report", help="analyse an emulator log")
@@ -242,9 +316,31 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--monitor-port", type=int, default=runner.DEFAULT_MONITOR_PORT)
     ui.add_argument("--host", default="127.0.0.1")
     ui.add_argument("--scale", type=int, default=6, help="window scale (6 gives 768x384)")
-    ui.add_argument("--timeout", type=float, default=30.0, help="seconds to wait for the first frame")
+    ui.add_argument(
+        "--timeout",
+        type=float,
+        default=90.0,
+        help="seconds to wait for the first frame. The emulated boot reaches its first panel "
+        "byte ~13 s of wall time in (the firmware's power-init retry delays are real emulated "
+        "time since the DWT handshake), and a run with DWT access logging needs minutes - so "
+        "this is deliberately generous",
+    )
     ui.add_argument("--attach", action="store_true", help="do not start Renode; attach to a running one")
     ui.add_argument("--no-buttons", action="store_true", help="do not connect to the monitor")
+    ui.add_argument(
+        "--card",
+        action="store_true",
+        help="put the microSD card in its slot before the firmware boots. Without it the "
+        "firmware's storage gate (/int/.slideshow) is false, the desktop's first-start "
+        "slideshow is never queued, and the window shows the idle animation instead",
+    )
+    ui.add_argument(
+        "--renode-include",
+        action="append",
+        default=None,
+        help="monitor script to load at start-up (repeatable), e.g. an instrumented "
+        "probe; expands to 'include @<path>'",
+    )
     ui.add_argument(
         "--selftest",
         type=float,

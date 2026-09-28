@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Reset/crash probe: watch the firmware's reset requests and report the caller.
 
 Load this into a running session with
@@ -21,7 +22,11 @@ from Antmicro.Renode.Peripherals.Bus import Access, SysbusAccessWidth
 from System.Threading import Thread, ThreadStart
 import time
 
-OUT = "artifacts/reset-probe.log"
+#: Absolute, because Renode resolves a probe's relative paths against *its own*
+#: installation root: a bare "artifacts/reset-probe.log" silently landed in the
+#: Renode directory, which made the probe look like it had not loaded at all.
+#: The sibling probes (wake_probe, lptim_probe) are absolute for the same reason.
+OUT = r"C:\Users\gtttr\auraesp32\flipper-emu\artifacts\reset-probe.log"
 
 #: Registers worth seeing next to a reset: clock tree, RTC, power, radios.
 MARKERS = (

@@ -20,18 +20,36 @@ import os
 import sys
 import time
 import tkinter as tk
-from typing import Optional
+from typing import Dict, Optional
 
-from ..console.monitor import MonitorError, RenodeMonitor
+from ..console.monitor import MonitorError, RenodeMonitor, check_reply
 from . import keymap, st7567
 
 DEFAULT_STREAM = os.path.join("artifacts", "display-stream.bin")
 DEFAULT_SCALE = 6
 POLL_MS = 40
 
+#: Renode hooks the self-test arms *over the monitor*, each printing a marker into the
+#: session log, so the answers come from inside the firmware.  Addresses from
+#: firmware/flipper-z-f7-firmware-1.4.3.elf, Thumb bit cleared:
+#:
+#:   0x080827E8  input_isr        the input service's GPIO callback: the press reached
+#:                                the firmware, not just the emulated pin
+#:   0x08082500  view_port_input  the gui handing the event to the active view port
+#:
+#: Without them a selftest can only see the panel move, which the idle animation does
+#: on its own - which is how "the keys do nothing" could go unnoticed.
+FIRMWARE_MARKERS = (
+    ("isr", 0x080827E8),
+    ("view", 0x08082500),
+)
+MARKER_PREFIX = "BTNMARK"
+
 #: Decoding budget per poll, and when to jump forward instead of catching up.
-#: The firmware redraws continuously (its delays are collapsed by the DWT stub),
-#: so the stream can outrun a host-side decoder.
+#: The firmware can outrun a host-side decoder: it writes a full page whenever the
+#: GUI changes.  (`DwtWb55` paces `furi_delay_us()` waits in real emulated time;
+#: before that handshake the delays were collapsed into a single read, which gave
+#: far more redraws per second - see `docs/BRINGUP_LOG.md` §22.)
 MAX_CHUNK = 256 * 1024
 SKIP_THRESHOLD = 512 * 1024
 KEEP_BYTES = 64 * 1024
@@ -63,8 +81,8 @@ class DisplayStreamTail:
     def poll(self) -> bool:
         """Consume whatever is new; ``True`` when the framebuffer changed.
 
-        The firmware redraws faster than the emulator is paced (its delays are
-        collapsed by the DWT stub), so the stream can outrun a host-side decoder.
+        The firmware can still redraw faster than a host-side decoder consumes the
+        stream (a full page write per GUI change), so the tail can fall behind.
         When it does, the tail skips forward to the newest records instead of
         falling further behind: page/column commands arrive constantly, so the
         picture heals within a frame or two, and the UI stays live.
@@ -212,11 +230,60 @@ class FlipperWindow:
     def run(self) -> None:
         self.root.mainloop()
 
+def arm_markers(monitor) -> int:
+    """Install the marker hooks over the monitor; returns how many were accepted."""
+    armed = 0
+    for label, address in FIRMWARE_MARKERS:
+        command = 'cpu AddHook 0x%08X "print(\'%s %s\')"' % (address, MARKER_PREFIX, label)
+        try:
+            reply = monitor.command(command, wait=0.2)
+        except MonitorError as exc:
+            print("selftest: cannot arm the %s marker: %s" % (label, exc))
+            continue
+        problem = check_reply(reply)
+        if problem:
+            print("selftest: the %s marker was refused: %s" % (label, problem))
+        else:
+            armed += 1
+    return armed
+
+
+def log_size(path: Optional[str]) -> int:
+    """Size of the session log, so markers can be counted after the tap only."""
+    if not path:
+        return 0
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def read_markers(path: Optional[str], offset: int = 0) -> Dict[str, int]:
+    """Count each marker printed since ``offset`` in the session log.
+
+    A missing or unreadable log reports zero for every marker rather than raising: the
+    caller's question is always "did this stage happen?", and a log that is not there
+    has not shown any stage.
+    """
+    text = ""
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(offset)
+                text = handle.read()
+        except OSError:
+            text = ""
+    return {label: text.count("%s %s" % (MARKER_PREFIX, label)) for label, _ in FIRMWARE_MARKERS}
+
+
 def selftest(args) -> int:
     """Headless check: tail the stream, tap OK, report what changed.
 
-    This is how the whole chain is validated without a display: frames must be
-    decoded, and the framebuffer must change after a button is injected.
+    The panel changing is not proof that a button arrived - the idle animation redraws
+    by itself - so the check that matters is made *inside the firmware*: two hooks are
+    armed over the monitor (the input service's ISR, and the gui's view-port delivery),
+    each printing a marker into the session log, and the markers are read back after the
+    tap.  That turns "the keys do nothing" into the stage that is missing.
     """
     monitor = RenodeMonitor(args.host, args.monitor_port)
     if not monitor.connect(attempts=20, delay=0.5):
@@ -224,6 +291,11 @@ def selftest(args) -> int:
         return 1
     injector = keymap.ButtonInjector(monitor)
     tail = DisplayStreamTail(args.stream)
+
+    if args.firmware_log:
+        armed = arm_markers(monitor)
+        print("selftest: armed %d firmware marker(s) in %s" % (armed, args.firmware_log))
+    log_offset = log_size(args.firmware_log)
 
     deadline = time.time() + args.selftest
     tap_at = time.time() + max(2.0, args.selftest / 3.0)
@@ -235,7 +307,11 @@ def selftest(args) -> int:
     while time.time() < deadline:
         tail.poll()
         if not tapped and time.time() >= tap_at:
-            injector.tap("OK")
+            try:
+                injector.tap("OK")
+            except MonitorError as exc:
+                print("FAIL: %s" % exc)
+                return 1
             frames_at_tap = tail.frames
             tapped = True
             print("selftest: injected OK at %d frames, %d events" % (tail.frames, tail.events))
@@ -250,6 +326,23 @@ def selftest(args) -> int:
     if tail.events == 0:
         print("FAIL: nothing decoded - is the emulator running and drawing?")
         return 1
+
+    markers = read_markers(args.firmware_log, log_offset)
+    if args.firmware_log:
+        print("selftest: firmware markers after the tap: %s" % (markers or "none"))
+        if markers.get("isr", 0) == 0:
+            print(
+                "FAIL: the press never reached the firmware's input service.  The "
+                "monitor command was sent, so check that this session owns the "
+                "monitor port (an orphaned Renode would have taken it)."
+            )
+            return 1
+        if markers.get("view", 0) == 0:
+            print(
+                "FAIL: the input service saw the press, but the gui never delivered it "
+                "to a view port - that is the emulator-side bug to chase."
+            )
+            return 1
     if not changed_after_tap:
         print("FAIL: the panel did not change after the injected button press")
         return 1
@@ -264,6 +357,13 @@ def main(argv=None) -> int:
     parser.add_argument("--monitor-port", type=int, default=3456)
     parser.add_argument("--scale", type=int, default=DEFAULT_SCALE, help="6 gives a 768x384 window")
     parser.add_argument("--no-buttons", action="store_true", help="render only, ignore the monitor")
+    parser.add_argument(
+        "--firmware-log",
+        default=None,
+        help="Renode session log to read the firmware markers from (the self-test arms "
+        "hooks over the monitor and counts them there, which is what proves a button "
+        "press reached the firmware rather than just the emulated pin)",
+    )
     parser.add_argument(
         "--selftest",
         type=float,

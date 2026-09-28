@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Set
 
+from ..console.monitor import MonitorError, check_reply
+
 #: Tk keysym -> button name.
 KEYMAP: Dict[str, str] = {
     "Up": "UP",
@@ -75,7 +77,9 @@ class ButtonInjector:
         button = BUTTONS.get(name)
         if button is None:
             return False
-        self.monitor.send(button.command(True))
+        problem = check_reply(self.monitor.send(button.command(True)))
+        if problem:
+            raise MonitorError("press %s was refused: %s" % (name, problem))
         self.held.add(name)
         return True
 
@@ -83,7 +87,9 @@ class ButtonInjector:
         button = BUTTONS.get(name)
         if button is None:
             return False
-        self.monitor.send(button.command(False))
+        problem = check_reply(self.monitor.send(button.command(False)))
+        if problem:
+            raise MonitorError("release %s was refused: %s" % (name, problem))
         self.held.discard(name)
         return True
 

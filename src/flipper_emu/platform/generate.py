@@ -42,15 +42,19 @@ PERIPHERAL_PROPERTIES: Dict[str, List[str]] = {
     "TIM16": ["frequency: %d" % SYSTEM_CLOCK_HZ, "initialLimit: 0xFFFF"],
     "TIM17": ["frequency: %d" % SYSTEM_CLOCK_HZ, "initialLimit: 0xFFFF"],
     "IWDG": ["frequency: 32000", "windowOption: true", "defaultPrescaler: 0x0"],
-    "LPTIM1": ["frequency: 0x1000000"],
-    "LPTIM2": ["frequency: 0x1000000"],
+    # Our LPTIM model counts at the LSE rate the firmware selects for its tickless
+    # idle timer (FURI_HAL_IDLE_TIMER_CLK_HZ = 32768, furi_hal_os.c) and takes its
+    # index so it can watch its own RCC reset line (APB1RSTR1 bit 31 / APB1RSTR2
+    # bit 5), which is how furi_hal_idle_timer_reset() stops it.
+    "LPTIM1": ["frequency: 32768", "index: 1"],
+    "LPTIM2": ["frequency: 32768", "index: 2"],
     "FLASH": ["flash: flash", "eeprom: optionBytes"],
     "SPI1": ["series: STM32Series.F4"],
     "SPI2": ["series: STM32Series.F4"],
     "USART1": ["frequency: %d" % SYSTEM_CLOCK_HZ],
     "LPUART1": ["frequency: %d" % SYSTEM_CLOCK_HZ, "lowPowerMode: true"],
-    "DMA1": ["numberOfChannels: 7"],
-    "DMA2": ["numberOfChannels: 7"],
+    "DMA1": ["channels: 7"],
+    "DMA2": ["channels: 7"],
     "CRC": ["series: STM32Series.F0", "configurablePoly: true"],
     "EXTI": ["numberOfLines: 44"],
     # The WB55 has 32 hardware semaphores; the firmware uses 0 (RNG), 3 (RCC),
@@ -134,12 +138,22 @@ DEFAULT_STUB_SCRIPT = "if request.IsRead: request.Value = 0"
 #: (declaration name, Renode type, bus, extra properties).
 #: `{artifacts}` is expanded to an absolute path at generation time: Renode
 #: resolves relative paths against its own root, not the caller's directory.
+#:
+#: SPI2 carries *two* devices on the real board - the ST7567 panel and the
+#: microSD card, chip-selected by PC11 and PC12 respectively (both handles in the
+#: firmware's `fh_furi_hal_spi_config.c` sit on `furi_hal_spi_bus_d`). Renode
+#: delivers every SPI transfer to its single attached peripheral, so the split is
+#: done by `Spi2Bus`, which owns both models and routes by chip select
+#: (docs/BRINGUP_LOG.md section 20).
 ATTACHED_DEVICES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     (
-        "st7567",
-        "Antmicro.Renode.Peripherals.FlipperEmu.St7567Display",
+        "spi2bus",
+        "Antmicro.Renode.Peripherals.FlipperEmu.Spi2Bus",
         "spi2",
-        ('outputPath: "{artifacts}/display-stream.bin"',),
+        (
+            'panelOutputPath: "{artifacts}/display-stream.bin"',
+            'cardImagePath: "{artifacts}/sdcard-run.img"',
+        ),
     ),
 )
 
@@ -148,32 +162,67 @@ ATTACHED_DEVICES: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
 #: port name -> ((pin, model, input index), ...).
 #: The pins are the firmware's own, read out of its pin table in the 1.4.3 ELF:
 #: `gpio_display_di` = PB1 (A0/DC: low = command, high = data) and
-#: `gpio_display_rst_n` = PB0 (active low). Wiring them makes the recorder tag
-#: every byte with real command/data framing, instead of the host inferring it.
+#: `gpio_display_rst_n` = PB0 (active low) - wiring them makes the recorder tag
+#: every byte with real command/data framing instead of the host inferring it -
+#: plus `gpio_display_cs` = PC11 and `gpio_sdcard_cs` = PC12, which is what tells
+#: the router which of the two chips a byte belongs to.
 GPIO_MODEL_CONNECTIONS: Dict[str, Tuple[Tuple[int, str, int], ...]] = {
-    "GPIOB": ((1, "st7567", 0), (0, "st7567", 1)),
+    "GPIOB": ((1, "spi2bus", 0), (0, "spi2bus", 1)),
+    "GPIOC": ((11, "spi2bus", 3), (12, "spi2bus", 2)),
 }
 
 
 #: Peripheral interrupt outputs -> NVIC input, keyed by peripheral name.
-#: The IRQ numbers were read out of the *firmware's own vector table* (the handler
-#: address at vector slot 16 + n identifies which peripheral owns IRQ n), not from a
-#: datasheet: LPTIM1 = 46, LPTIM2 = 47, RTC alarm = 40, TIM2 = 27, TIM16/TIM1_UP =
-#: 24, TIM17/TIM1_TRG_COM = 25, USART1 = 35. Without these the firmware's tickless
-#: idle arms LPTIM1, executes WFI, and nothing ever wakes it - measured: the CPU
-#: frozen at `furi_hal_power_sleep+0xC3` with no instruction retirement for 20 s,
-#: so the panel stopped being drawn (docs/BRINGUP_LOG.md §19).
-#: RTC wakeup is deliberately absent: the firmware's `RTC_WKUP_IRQHandler` vector is
-#: still the default handler, so it does not use that path.
+#:
+#: Derivation, not a datasheet: the handler name at slot ``16 + n`` of the
+#: image's vector table owns IRQ ``n``.  Read the table (``artifacts/flash.img``)
+#: and resolve each entry against the release ELF's own symbols - that is the
+#: method ``tests/test_irq_numbers.py`` re-runs, and it is what caught the
+#: off-by-one that had been in this map.  Measured values:
+#: ``TIM1_UP/TIM16 = 25``, ``TIM1_TRG_COM/TIM17 = 26``, ``TIM1_CC = 27``,
+#: ``TIM2 = 28``, ``USART1 = 36``, ``LPUART1 = 37``, ``RTC alarm = 41``,
+#: ``IPCC_C1_RX = 44``, ``IPCC_C1_TX = 45``, ``HSEM = 46``, ``LPTIM1 = 47``,
+#: ``LPTIM2 = 48``.
+#:
+#: The off-by-one mattered: with ``LPTIM1 -> nvic@46`` the firmware's tickless
+#: idle armed LPTIM1, the model raised its IRQ onto HSEM's masked NVIC input
+#: (measured at the freeze: ``ISER1 = 0x0040B300`` with IRQ 47 enabled,
+#: ``ISPR1 = 0x00004000`` -> IRQ 46 pending but never delivered), so the CPU
+#: stayed in WFI for the rest of the session and the panel stopped being drawn
+#: (docs/ISSUES_AND_LOGS.md, problem P17).
+#:
+#: ``RTC_WKUP`` is deliberately absent: IRQ 3's vector is the firmware's default
+#: handler, so it does not use that path.  ``TIM1`` owns three vectors
+#: (UP/TRG_COM/CC) and a model output drives one NVIC input, so UP (25) is wired.
 PERIPHERAL_NVIC_IRQS: Dict[str, Tuple[Tuple[str, int], ...]] = {
-    "TIM1": (("IRQ", 24),),
-    "TIM2": (("IRQ", 27),),
-    "TIM16": (("IRQ", 24),),
-    "TIM17": (("IRQ", 25),),
-    "LPTIM1": (("IRQ", 46),),
-    "LPTIM2": (("IRQ", 47),),
-    "USART1": (("IRQ", 35),),
-    "RTC": (("AlarmIRQ", 40),),
+    "TIM1": (("IRQ", 25),),
+    "TIM2": (("IRQ", 28),),
+    "TIM16": (("IRQ", 25),),
+    "TIM17": (("IRQ", 26),),
+    "USART1": (("IRQ", 36),),
+    "LPUART1": (("IRQ", 37),),
+    "LPTIM1": (("IRQ", 47),),
+    "LPTIM2": (("IRQ", 48),),
+    "RTC": (("AlarmIRQ", 41),),
+}
+
+#: DMA channel completions: channel *index* -> NVIC input.
+#:
+#: A DMA channel is the one case where one peripheral owns eight separate vectors,
+#: so the single-signal form of ``PERIPHERAL_NVIC_IRQS`` cannot express it: the
+#: model's output index is the channel number (Renode numbers them from 0) and each
+#: one feeds its own NVIC input.  Without these lines the firmware's
+#: ``spi_dma_isr`` never runs, and since ``furi_hal_spi_bus_trx_dma()`` waits on the
+#: semaphore that ISR releases, every microSD block read stalls (problem P21).
+#:
+#: Numbers come from the firmware's own vector table - the handler named at slot
+#: ``16 + n`` owns IRQ ``n`` - resolved by exact address in the release ELF, the
+#: method that pinned LPTIM1 = 47 (``tests/test_irq_numbers.py``).  Measured:
+#: ``DMA1_Channel1..7`` = 11..17, ``DMA2_Channel1..7`` = 55..61, so the microSD SPI2
+#: pair is ``DMA2_Channel6`` = IRQ 60 (RX) and ``DMA2_Channel7`` = IRQ 61 (TX).
+DMA_CHANNEL_IRQS: Dict[str, Tuple[int, ...]] = {
+    "DMA1": (11, 12, 13, 14, 15, 16, 17),
+    "DMA2": (55, 56, 57, 58, 59, 60, 61),
 }
 
 
@@ -261,6 +310,11 @@ def connection_lines(entry: memmap.Peripheral) -> List[str]:
             "[%d-%d] -> extiHighGroup@[0-%d]" % (high_start, high_end, high_end - high_start)
         )
         return lines
+    if entry.name in DMA_CHANNEL_IRQS:
+        return [
+            "%d -> nvic@%d" % (channel, irq)
+            for channel, irq in enumerate(DMA_CHANNEL_IRQS[entry.name])
+        ]
     if entry.name in PERIPHERAL_NVIC_IRQS:
         return [
             "%s -> nvic@%d" % (signal, irq)

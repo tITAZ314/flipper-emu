@@ -1,0 +1,5 @@
+# Put the microSD card in the slot: SD_CD (PC10) is active low, and the firmware
+# gates storage init on it (furi_hal_sd_detect).  Kept as a monitor script rather
+# than a `--renode-command` string because that argument has to survive shell and
+# Start-Process quoting, which mangles commands containing spaces.
+gpioPortC OnGPIO 10 false

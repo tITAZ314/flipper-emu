@@ -2,8 +2,7 @@
 
 Runs **real, unmodified Flipper Zero firmware** — the official `.dfu` packages,
 exactly as qFlipper flashes them — on a desktop PC. No hardware, no firmware
-patches, no special build defines. VERY EARLY VERSION, MANY THINGS DONT WORK !!!
-
+patches, no special build defines.
 
 The emulated board is a STM32WB55RG described to [Renode](https://renode.io)
 (MIT), with the peripherals of the real Flipper Zero on top: 128×64 ST7567
@@ -20,9 +19,9 @@ mailbox.
 | `.dfu` loader (DfuSe, including Flipper's variant layout) | **done** — 14 tests, verified byte-for-byte against the official 1.4.3 package |
 | Flash image assembly + persistence across runs | **done** — 1 MiB image, dumped on exit, guarded so a failed run cannot destroy it |
 | STM32WB55 platform description | **done** — 50 register blocks, 57 instances, loads cleanly in Renode 1.17 |
-| Real firmware executes | **yes** — the application boots cold (this `.dfu` is app-only, no bootloader — see Next Steps), GPIO/HSEM models supply what the bootloader would normally provide, and Furi brings up RTC/interrupts/resources/SPI/iButton/speaker/crypto/I2C/power/BT, reaching "Boot mode 0, starting services" with **zero** crashes |
+| Real firmware executes | **yes** — the 1.4.3 bootloader reads its buttons as released, starts the application, and Furi brings up RTC/interrupts/resources/SPI/iButton/speaker/crypto/I2C/power/BT and reaches "Boot mode 0, starting services" with **zero** crashes |
 | Custom C# peripheral models | **yes** — `Wb55Exti`, `GpioWb55Port` (GPIO with a real input path), `HsemWb55` (hardware semaphores) and `St7567Display` load as a Renode plugin; recipe in `peripherals/cs/README.md` |
-| Boots to the home screen | **reached** — the application runs, the GUI starts and the panel is drawn (Desktop idle animation; see `docs/BRINGUP_LOG.md` §18). Remaining errors are the absent chips: gauge, Sub-GHz, NFC and the CPU2/wireless stack |
+| Boots to the home screen | **done** — the application runs, the GUI starts, and the Desktop's idle animation keeps playing: a 45 s run gives 0 resets, 0 `furi_check` failures and **841 distinct framebuffer states** (`artifacts/display-stream-45s.bin`; see `docs/BRINGUP_LOG.md` §18–19; recorded before the DWT handshake of §22, which makes the counter advance in real emulated time and lowers the observed cadence - 7 states in an 18 s no-card run, which is only a short-run artifact: the honest cycle counter puts the first panel byte ~3 s of wall time in - 13 s before the DWT step was raised to 4 us, see §22 - so watch runs of 40 s or more). Remaining errors are the absent chips: gauge, Sub-GHz, NFC and the CPU2/wireless stack |
 | Button input | **done** — injected levels drive polled reads (boot-time board levels from `flipper_zero.resc`) and EXTI-driven presses come from the UI / monitor |
 | Live window | **done** — `flipper_emu ui` (tkinter) tails the panel recorder and injects buttons; it shows exactly what the firmware has drawn (blank until the app gets past BT init) |
 
@@ -60,6 +59,11 @@ Useful variants:
 | `py -3.9 -m flipper_emu ui --attach` | attach to an emulator you started yourself |
 | `py -3.9 -m flipper_emu ui --selftest 20` | headless check: tail for 20 s, inject OK, report frames and whether the panel changed |
 | `py -3.9 -m flipper_emu ui --no-buttons` | render only (no monitor connection) |
+
+The live path is verified without a window: `ui --selftest 20` tails the recorder and
+injects OK through the same code the window uses, and reports `events=47872 frames=48
+resyncs=0` followed by `OK: display decoded live and buttons reach the firmware`
+(measured 09-27 22:31).
 
 ## Quick start
 
@@ -103,9 +107,9 @@ The project keeps four boundaries, so each layer can be changed or tested alone:
 |---|---|
 | `flipper_emu.fw` | **Firmware loader**: DfuSe parsing, flash image assembly/persistence, the STM32WB55 address map (single source of truth) |
 | `flipper_emu.platform` | **Bus/platform**: renders the Renode `.repl`/`.resc` from that address map |
-| `flipper_emu.peripherals` | **Peripheral models**: IronPython 2.7 register models (`python/`) and C# bus devices (`cs/`, display + SD card) |
+| `flipper_emu.peripherals` | **Peripheral models**: IronPython 2.7 register models (`python/`) and C# bus devices (`cs/`: GPIO port, EXTI, HSEM, LPTIM, RNG, ST7567 panel). The microSD card - which in 1.4.3 also owns `/int` - is **not** modelled yet (`BRINGUP_LOG.md` §20) |
 | `flipper_emu.console` | **Debug console**: turns a Renode log into the bring-up digest (unimplemented registers, unmapped accesses, boot loops, faults) |
-| `flipper_emu.frontend` | **UI/rendering**: 128×64 framebuffer window with key→button mapping (`ui_tk.py`) |
+| `flipper_emu.frontend` | **UI/rendering** (planned): 128×64 framebuffer window with key→button mapping |
 | `flipper_emu.runner` / `cli.py` | Session orchestration and the command line |
 
 Design rules that keep it honest:
@@ -125,7 +129,6 @@ Design rules that keep it honest:
 
 ---
 
-
 ## Supported firmware and files
 
 * `firmware/*.dfu` — official stock, Momentum and RogueMaster packages all use
@@ -142,10 +145,12 @@ Design rules that keep it honest:
 * **BLE Core2 is stubbed.** The IPCC mailbox acknowledges channels instantly
   (`peripherals/python/ipcc_wb55.py`), but the payload the firmware reads from the
   shared SRAM area (FUS/stack version) is not synthesised.
-* **The animation-timer wakeup path is still being finalised.** The firmware
-  boots to the home screen and draws correctly, but its idle-animation timer
-  interrupt isn't fully wired yet, so playback can stall after the first few
-  frames; see `docs/BRINGUP_LOG.md` for the current state.
+* **The idle animation plays, and the timer behind it is modelled** —
+  `peripherals/cs/LptimWb55.cs` replaced Renode's stock LPTIM, so the tickless idle wakes
+  on real compare matches (53 one-shots / 52 compare matches in 10 s) instead of freezing
+  on one frame: a 45 s run gives 0 resets, 0 crashes and 841 distinct framebuffer states
+  (P17/P24 resolved). Every problem hit so far, with raw logs and reproduction commands:
+  `docs/ISSUES_AND_LOGS.md`; the chronological story: `docs/BRINGUP_LOG.md`.
 * **UART capture is wired up but silent**: the firmware's early diagnostics appear
   to go over USB CDC, which is a stub, so nothing reaches USART1 yet.
 * **No Python `pip` dependencies.** Host tooling is standard-library only, and
@@ -157,24 +162,9 @@ Design rules that keep it honest:
 
 ## Next steps
 
-1. Finish wiring the animation-timer interrupt path so idle-animation playback
-   no longer stalls after the first few frames.
-2. Run the real Flipper bootloader instead of standing in for its one measured
-   side effect (the CLK48 hardware-semaphore handover) — this is what turns
-   "this firmware build works" into "any Flipper firmware build works".
-3. SD card and external SPI flash (W25Q64) emulation.
-4. Verify a second, independently-built firmware version boots with no manual
-   tuning, as the real test of firmware-agnostic support.
-   
----
-
-> **Development note:** built with heavy use of AI coding assistance
-> (Deepseek V4.1 / Claude) for implementation, debugging, and documentation,
-> under my direction and review throughout. The engineering approach and
-> every decision were mine; AI was a tool in the process. Disclosed here
-> for transparency.
-
-## License
-
-GPL-3.0 — see `LICENSE` for the full text. Contributions and forks are welcome
-under the same terms.
+1. Implement the remaining WB55 register semantics the digest points at (RCC
+   reset pulses, EXTI pending/IMR masking, GPIO `OTYPER`/`BSRR` semantics),
+   iterating one boot-loop cause at a time.
+2. Add the C# `ST7567` SPI device so the 128×64 framebuffer becomes readable, then
+   the tkinter UI + key→button injection over the Renode monitor.
+3. Fake the IPCC/FUS "stack installed" handshake so `furi_hal_bt` stops failing.

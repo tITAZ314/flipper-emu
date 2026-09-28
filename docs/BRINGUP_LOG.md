@@ -1015,6 +1015,82 @@ The RNG semaphore is held by CPU1 from reset and handed straight back to it when
 freed (this emulator has no CPU2/FUS to arbitrate it), with `coreIdWriteClaims: false`.
 Measured:
 
+## 22. The microSD card mounts in the emulator (09-28)
+
+The storage service now mounts the card: `[I][StorageExt] card mounted` at 1245 ms, 759
+command frames, 67 sectors read, 0 resets and 0 crashes in a 24 s run - and the firmware then
+reads `/int/.notification.settings` off the card image (which only carries
+`/.int/.slideshow`, so the other reads fail with "file/dir not exist" as expected).
+
+Two platform bugs stood in the way, both measured before being fixed
+(`docs/ISSUES_AND_LOGS.md`, P26):
+
+* the DWT stub's 2^26-cycle step per read made every `furi_hal_cortex_timer` expire
+  immediately, so `sd_spi_wait_for_data()` read the 0xFE data token, declared a timeout and
+  purged the 512-byte block payload the card had just been handed (514 bytes discarded, 2 ms
+  of emulated time, zero writes to DMA2 in the whole run);
+* Renode's stock DMA model moved the bytes but never delivered the DMA2 channel-6 completion
+  interrupt that `furi_hal_spi_bus_trx_dma()` waits on, so every block read ended in
+  `[E][FuriHalSpi] DMA timeout` -> `furi_check` -> `[CRASH][StorageSrv]` at
+  `sd_device_read+0xCA` and a reboot loop.
+
+`peripherals/cs/DwtWb55.cs` (CYCCNT advances one microsecond per read) and
+`peripherals/cs/DmaWb55.cs` (WB55 channel DMA, one level interrupt per channel, RX advanced
+in lockstep with the TX channel that clocks it) replace the stub and the stock model.
+`generate.py` wires DMA2 channel 6 to IRQ 60 and channel 7 to IRQ 61 - numbers taken from the
+firmware's own vector table and pinned by `tests/test_irq_numbers.py`.
+
+Reproduction:
+
+```
+# Card present: SD_CD (PC10) is active low.  Passed as an include script because a
+# --renode-command containing spaces cannot survive Start-Process quoting.
+py -3.9 src/flipper_emu/platform/sdcard_build.py        # rebuild: the firmware deletes /.int/.slideshow
+py -3.9 -m flipper_emu run --seconds 40 --renode-include src/flipper_emu/platform/card_present.resc
+py -3.9 -m flipper_emu.frontend.frame_stats artifacts/display-stream.bin
+```
+
+Two timing facts about this platform, both consequences of the honest cycle counter, both of which
+make a short run look blank even though the firmware is drawing:
+
+* the **first panel byte lands ~13 s of wall time into a run** (`furi_hal_power_init`'s
+  gauge/charger retry delays are real emulated time now), so a run under ~20 s shows
+  `commands=0 data_bytes=0 frames=0` with nothing drawn at all - measure with 40 s;
+* **never add `--renode-include src/flipper_emu/platform/dwt_trace.resc` to a run you want to
+  watch.** `sysbus LogPeripheralAccess dwt` logs every CYCCNT read, and the delay loops read it
+  millions of times: measured 1,803,772 log lines in 20 s with the panel stream still at 0 bytes,
+  i.e. the boot never reaches its first draw. That include exists for short, targeted looks at the
+  counter, not for rendering runs.
+
+Snapshot, 09-28 - updated counts:
+
+```
+py -3.9 -m unittest discover -s tests     ->  Ran 95 tests ... OK   (94 before, +1 for the DMA wiring)
+```
+
+Still open for the first-start slideshow: the card model never completes a write
+(`0 sectors written`, so settings saves fail with "internal error" and the slideshow file
+cannot be deleted), and the slideshow frames have not been observed on the panel yet - the
+stream from the mounting run holds only 9 framebuffer states.
+
+A follow-up that started as a suspected regression is worth recording: a 20 s run recorded only
+7 framebuffer states, and a 40 s run records **739** (78 848 data bytes, 1857 commands, 0 resets)
+- the low figure was simply the run ending moments after the first draw, because the honest
+counter put the first panel byte ~13 s of *wall* time into the run. The animation itself is paced
+by `furi_timer_start()` (the RTOS timer, `bubble_animation_view.c`), not by CYCCNT, so the DWT
+handshake never affected its cadence. What *did* come out of it is the step size now used:
+CYCCNT advances 4 us per read instead of 1 us, which moved the first draw from 13.1 s to 3.2 s of
+wall time while staying five times below the tightest timeout in the firmware.
+
+Also worth knowing before watching a run: **do not add
+`--renode-include src/flipper_emu/platform/dwt_trace.resc`**. That logs every CYCCNT read, and
+the delay loops read it millions of times - measured 1 803 772 log lines in 20 s with the panel
+stream still at 0 bytes, i.e. the boot never reaches its first draw. It exists for short,
+targeted looks at the counter.
+
+
+
+
 ```
 HSEM: no arbitration here - semaphores 0x1 are held by core 4 from reset
 hsem: HSEM RLR[0] (RNG): 0x80000400            <- the wait passes
@@ -1081,5 +1157,190 @@ py -3.9 -m flipper_emu check            ->  load result: ok, 57 peripherals (29 
 py -3.9 -m flipper_emu run --seconds 22 ->  0 crashes, 0 resets
                                             GUI init: AnimationManager selects an idle animation
                                             panel: 6144 data bytes + 155 commands
+```
+
+## 19. The tickless idle wakes up: our own LPTIM model, and the animation plays
+
+§18 ended with the panel drawn but the screen frozen: the GUI was initialised, one frame
+was rendered, and then the core parked in `furi_hal_power_sleep` waiting for a wakeup that
+never came (P17). The wakeup is LPTIM1, and the reason it never arrived was the model.
+
+The firmware's tickless idle (`furi_hal_idle_timer.h`, `furi_hal_os.c`:
+`vPortSuppressTicksAndSleep`) arms LPTIM1 as a **one-shot compare-match** timer with
+interrupts masked, sleeps in WFI, then *polls* the CMPM/ARRM flags and clears the pending
+IRQ in `furi_hal_idle_timer_reset()` (an RCC reset of the timer plus
+`NVIC_ClearPendingIRQ`). It registers **no ISR** for IRQ 47 - so any delivery of that
+interrupt ends in `furi_check(isr_descr->isr)` and a reset. Renode's
+`Timers.STM32L0_LpTimer` fires on its own `LimitTimer` limit rather than the compare match
+it was given, and says so (`Compare value (16117) cannot be greater than auto reload limit
+(1). Compare value will be ignored`), which produced 96-322 crashes and chip resets per
+run.
+
+So `peripherals/cs/LptimWb55.cs` replaces it: a one-shot counter to `CMP` and on to `ARR`,
+a level IRQ on `ISR & DIER`, `CNT` reading 0 after a completed one-shot, and - the piece
+that makes the handshake terminate - a bus hook on the timer's own RCC reset line
+(`RCC_APB1RSTR1` bit 31 / `APB1RSTR2` bit 5) so `furi_hal_idle_timer_reset()` really does
+stop it. `src/flipper_emu/platform/lptim_probe.py` samples the model's own `DumpState()`
+rather than the bus (P20 showed core-space bus reads are unreliable):
+
+```
+t+ 2s lptim1 CR=0x00000003 ISR=0x0 DIER=0x00000001 CMP=15429 ARR=15432 CNT=7372  starts=11 cmpm=10 irq=False
+t+10s lptim1 CR=0x00000003 ISR=0x0 DIER=0x00000001 CMP=15462 ARR=15465 CNT=10265 starts=53 cmpm=52 irq=False
+```
+
+53 one-shots and 52 compare matches in 10 s with the interrupt line low at every sample:
+the firmware wakes, reads a live counter, and clears the pending IRQ.
+
+The measurement that closes P17 - a 45 s run (`artifacts/anim45.log`), `platform resets: 0`,
+0 `furi_check` failures, 216 LPTIM1 reset-line assertions, and **841 distinct framebuffer
+states** across 1,463 snapshots:
+
+```
+py -3.9 -m flipper_emu.frontend.frame_stats artifacts/display-stream-45s.bin
+  stream: artifacts\display-stream-45s.bin (187301 bytes, 1463 snapshots of 64 records)
+  distinct framebuffer states: 841   (the Desktop idle animation keeps playing)
+```
+
+and the live path verified without a human watching, through the same tail + injector the
+window uses:
+
+```
+py -3.9 -m flipper_emu ui --selftest 20
+  selftest: injected OK at 20 frames, 20224 events
+  selftest: events=47872 frames=48 resyncs=0
+  OK: display decoded live and buttons reach the firmware
+```
+
+The platform generator is the source of truth for this: `fw/memmap.py` holds `LPTIM_MODEL`
+and both timers are rendered from it, so `py -3.9 -m flipper_emu platform` reproduces the
+`platform/` files **byte for byte** (checked by hash before/after) and no platform file
+needs hand-editing.
+
+Remaining errors are still only the absent chips (gauge, Sub-GHz, NFC, CPU2/wireless), all
+non-fatal and visible in the log: see the table in §18.
+
+Snapshot, 09-27 22:45 - every number above is reproducible from a clean checkout:
+
+```
+py -3.9 -m unittest discover -s tests     ->  Ran 86 tests ... OK
+py -3.9 -m flipper_emu check              ->  load result: ok, 57 peripherals instantiated
+py -3.9 -m flipper_emu platform           ->  platform/ files byte-identical (idempotent)
+py -3.9 -m flipper_emu run --seconds 45   ->  platform resets: 0, cpu starts: 1, 0 furi_check
+py -3.9 -m flipper_emu ui --selftest 20   ->  events=47872 frames=48 resyncs=0, OK
+```
+
+Open items left are peripheral coverage, not the boot path: no gauge (I2C stub), no Sub-GHz
+(CC1101), no NFC (ST25R3916), no CPU2/wireless stack, and the microSD card over SPI2.
+
+## 20. What storage actually is in 1.4.3, and the SD conversation on SPI2
+
+The first-start slideshow is gated by one call:
+
+```c
+if(storage_file_exists(desktop->storage, SLIDESHOW_FS_PATH))   // "/int/.slideshow"
+    scene_manager_next_scene(desktop->scene_manager, DesktopSceneSlideshow);
+```
+
+so "why is the slideshow missing" is "why does `/int/.slideshow` not exist". Section 19's
+snapshot assumed that means a missing **internal-flash** volume (LittleFS on an SPI flash
+chip). Instrumenting the firmware says otherwise, and this section records the correction.
+
+**There is no internal flash volume in 1.4.3.** `storage_internal_dirname_i.h` defines
+`STORAGE_INTERNAL_DIR_NAME ".int"`, and every `/int/...` path is rewritten before it reaches
+a backend - `storage_process_alias()` in `storage_processing.c`, followed by
+
+```c
+furi_assert(type == ST_EXT);
+```
+
+i.e. internal storage **is a hidden directory on the SD card**: `/int/x` → `/ext/.int/x`.
+Consistent with that: the image has **zero `lfs_*` symbols**, links FatFS, and the only
+`f_mount` callers are the SD API and the bootloader's update path. A `check` run also shows
+QUADSPI untouched (0 accesses, 0 `SR` reads) - there is no flash device driver in this build
+to find.
+
+**The SD card is a slave on the panel's bus.** `fh_furi_hal_spi_config.c`:
+
+```c
+const FuriHalSpiBusHandle furi_hal_spi_bus_handle_sd_slow = {
+    .bus  = &furi_hal_spi_bus_d,          // the display bus - SPI2
+    .miso = &gpio_spi_d_miso, .mosi = &gpio_spi_d_mosi, .sck = &gpio_spi_d_sck,
+    .cs   = &gpio_sdcard_cs,              // PC12
+};
+```
+
+with `sd_fast` the same pins at the 16 MHz preset and `sd_slow` at 2 MHz. From
+`fh_furi_hal_resources.h`: `SD_CS = PC12`, `SD_CD = PC10` (active low), `SPI_D_SCK = PD1`,
+`SPI_D_MOSI = PB15`, `SPI_D_MISO = PC2`. Presence is one line -
+`furi_hal_sd_is_present() { return !furi_hal_gpio_read(&gpio_sdcard_cd); }` - and
+`sd_notify`/`StorageExt` mount only while it is true.
+
+**What the driver sends to a card** (`fh_furi_hal_sd.c`): 80 dummy clocks with CS high, then
+`sd_spi_send_cmd()` frames of `(cmd | 0x40)`, 4 argument bytes, `crc | 0x01` - CMD0
+`40 00 00 00 00 95`, CMD8 `48 00 00 01 AA 87`, CMD55 `77`, ACMD41 `69` (v2 sets bit 30),
+CMD58 `7A`, then CMD16/CMD13/CMD17/CMD18/CMD24/CMD25 with `0xFE` data tokens and 512-byte
+blocks (blocks go through DMA, everything else through byte-wise `furi_hal_spi_bus_trx`,
+`SD_TIMEOUT_MS = 1000`). Failure budgets live in the constants: `SD_IDLE_RETRY_COUNT = 100`
+(CMD0), 128 outer init retries, `furi_hal_sd_max_mount_retry_count() = 10`, plus a power reset
+path that disables external 3.3 V, grounds the bus, pulls CD low for 250 ms, then re-arms the
+pins and waits 100 ms.
+
+**The instrument that measured it.** The panel is the only slave attached to `spi2`
+(`st7567: ... @ spi2`), so the recorder file it writes is the *union* of everything shifted
+out on that bus - panel bytes and card bytes alike. `src/flipper_emu/platform/sd_stream_audit.py`
+parses those `[tag][payload]` records, looks for the driver's exact frames, and prints the
+bytes around every hit, so single-byte coincidences inside pixel data cannot pass as traffic.
+It replaced an IronPython watchpoint probe on the SPI data registers, which reported "no
+storage traffic on any bus" and was wrong twice over: it died with
+`AccessViolationException` under the card's byte volume, so its summary never printed, and two
+of its runs read a **stale** recorder file - the lock documented as P19 - which the copies
+gave away by being MD5-identical (`4DB2BE9FDA33624FD16D8372B15A942C`). A file written by the
+C# model cannot fail either way.
+
+Card-detect pin, measured with `src/flipper_emu/platform/cd_pin_probe.py` (GPIOC
+`IDR/MODER/OTYPER/PUPDR/ODR` over the first seconds):
+
+```
+board injects PC10 high  ->  IDR 0x00003C40   PC10/CD=1   (no card, as the board file intends)
+inject PC10 low          ->  IDR 0x00002840   PC10/CD=0   (card), OTYPER=0x400 (open-drain on
+                             pin 10, set by the power-reset path), PUPDR=0x05501010 (pull-up
+                             added by furi_hal_sd_presence_init)
+```
+
+A/B of the same 16 s run, differing only in that pin (audit output, trimmed):
+
+| | payload bytes on SPI2 | CMD0 `40 00 00 00 00 95` | firmware UART |
+|---|---|---|---|
+| no card | 31 451 | none | no `StorageExt` line at all |
+| card | 1 026 907 | **128 000** (first at offset 80) | `card detected`, then `init cycle 10 … 1, error: internal` every ~1.4 s |
+
+128 000 is exactly `10 mount retries × 128 init retries × 100 CMD0 attempts` from the
+constants above, and the histogram is what that implies - `00=513833 FF=256801 95=128002
+40=128001` - i.e. the firmware is shouting GO_IDLE_STATE into a bus where nothing answers (the
+panel model returns 0x00 while the driver waits for 0xFF, then 0x01). The 31 451-byte baseline
+matches the earlier watchpoint probe's number exactly, which is the cross-check that both
+instruments now agree.
+
+**Consequence for the slideshow.** The missing peripheral is the **microSD card**, not a flash
+chip: an SPI2 slave selected by PC12 that answers CMD0/CMD8/CMD55/ACMD41/CMD58 and serves
+512-byte blocks from a FAT image containing `.int/.slideshow` (built from
+`artifacts/first_start-dev/`). Two facts shape that work: `spi2` currently has exactly one
+connection, so Renode routes *all* transfers to the panel and card bytes have to be split by
+chip select; and the file the firmware looks for is deleted when the slideshow exits
+(`storage_common_remove(SLIDESHOW_FS_PATH)`), so the FAT image has to be disposable per run.
+
+Reproduction:
+
+```
+py -3.9 -m flipper_emu run --seconds 16                                    # no card: 31 451 bytes, no CMD0
+py -3.9 -m flipper_emu run --seconds 16 --renode-command "gpioPortC OnGPIO 10 false"   # card: 128 000 CMD0
+py -3.9 src/flipper_emu/platform/sd_stream_audit.py artifacts/display-stream.bin
+py -3.9 -m flipper_emu run --seconds 14 --renode-include src/flipper_emu/platform/cd_pin_probe.py
+```
+
+Snapshot, 09-28 07:40 - updated counts:
+
+```
+py -3.9 -m unittest discover -s tests     ->  Ran 94 tests ... OK   (86 before, +8 for the audit tool)
 ```
 

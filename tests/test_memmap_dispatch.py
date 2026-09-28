@@ -107,14 +107,25 @@ class PlatformGenerationTests(unittest.TestCase):
             self.assertIn('portName: "%s"' % name, self.repl)
 
     def test_gpio_pins_still_reach_exti(self) -> None:
-        """Every pin still reaches its EXTI line, with GPIOB's display pins split.
+        """Every pin reaches its EXTI line, except the four that feed Spi2Bus.
 
-        Renode refuses to use one output as a source twice, so the two pins that
-        feed the panel model are named individually and the rest of that port
-        keeps a range. The other five ports take the plain full range.
+        Renode refuses to use one output as a source twice, so pins that feed an
+        attached model are named individually and the rest of the port keeps a range.
+        GPIOB owns the panel's two chip-select lines and GPIOC owns the card's
+        (PC11 = SD_CS for the panel bus, PC12 = SD_CS for the card); they go to
+        ``spi2bus`` so the router can tell which slave a transfer belongs to instead
+        of sending card bytes to the panel.
         """
-        self.assertEqual(self.repl.count("[0-15] -> exti@[0-15]"), 5)
-        for line in ("[2-15] -> exti@[2-15]", "1 -> st7567@0", "0 -> st7567@1"):
+        self.assertEqual(self.repl.count("[0-15] -> exti@[0-15]"), 4)
+        for line in (
+            "[2-15] -> exti@[2-15]",
+            "1 -> spi2bus@0",
+            "0 -> spi2bus@1",
+            "[0-10] -> exti@[0-10]",
+            "[13-15] -> exti@[13-15]",
+            "11 -> spi2bus@3",
+            "12 -> spi2bus@2",
+        ):
             self.assertIn(line, self.repl)
 
     def test_resc_injects_released_button_levels(self) -> None:

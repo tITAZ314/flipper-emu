@@ -1,0 +1,12 @@
+# Log every access to the DWT model, with values.  Used to answer whether the
+# firmware's furi_hal_cortex_delay_us() spin loop sees CYCCNT advance: if the values
+# repeat, the emulated clock is not moving while the CPU sits in a translation block,
+# and an honest counter can never satisfy the loop (docs/ISSUES_AND_LOGS.md, P21).
+#
+# WARNING: do not use this for a run you intend to watch.  The firmware's delay loops
+# read CYCCNT millions of times (measured: 4,000,000 reads for the single
+# furi_delay_us(4000000) in furi_hal_power_init), so every one of them also costs a log
+# line and the boot never reaches its first draw - a 20 s run with this include logged
+# 1,803,772 lines and left the panel stream at 0 bytes.  Keep traced runs short and
+# targeted (docs/BRINGUP_LOG.md, §22).
+sysbus LogPeripheralAccess dwt

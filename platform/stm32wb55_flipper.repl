@@ -29,7 +29,7 @@ optionBytes: Memory.MappedMemory @ sysbus 0x1FFF8000
 tim2: Timers.STM32_Timer @ sysbus <0x40000000, +0x400>
     frequency: 64000000
     initialLimit: 0xFFFF
-    IRQ -> nvic@27
+    IRQ -> nvic@28
 
 rtc_backup: Python.PythonPeripheral @ sysbus 0x40002000
     size: 0x400
@@ -40,7 +40,7 @@ lcd: Python.PythonPeripheral @ sysbus 0x40002400
     script: "if request.IsRead: request.Value = 0"
 
 rtc: Timers.STM32F4_RTC @ sysbus <0x40002800, +0x400>
-    AlarmIRQ -> nvic@40
+    AlarmIRQ -> nvic@41
 
 wwdg: Python.PythonPeripheral @ sysbus 0x40002C00
     size: 0x400
@@ -66,17 +66,20 @@ usb1: Python.PythonPeripheral @ sysbus 0x40006800
     size: 0x400
     script: "if request.IsRead: request.Value = 0"
 
-lptim1: Timers.STM32L0_LpTimer @ sysbus <0x40007C00, +0x400>
-    frequency: 0x1000000
-    IRQ -> nvic@46
+lptim1: Antmicro.Renode.Peripherals.FlipperEmu.LptimWb55 @ sysbus <0x40007C00, +0x400>
+    frequency: 32768
+    index: 1
+    IRQ -> nvic@47
 
 lpuart1: UART.STM32F7_USART @ sysbus <0x40008000, +0x400>
     frequency: 64000000
     lowPowerMode: true
+    IRQ -> nvic@37
 
-lptim2: Timers.STM32L0_LpTimer @ sysbus <0x40009400, +0x400>
-    frequency: 0x1000000
-    IRQ -> nvic@47
+lptim2: Antmicro.Renode.Peripherals.FlipperEmu.LptimWb55 @ sysbus <0x40009400, +0x400>
+    frequency: 32768
+    index: 2
+    IRQ -> nvic@48
 
 syscfg: Python.PythonPeripheral @ sysbus 0x40010000
     size: 0x20
@@ -97,34 +100,48 @@ comp2: Python.PythonPeripheral @ sysbus 0x40010204
 tim1: Timers.STM32_Timer @ sysbus <0x40012C00, +0x400>
     frequency: 64000000
     initialLimit: 0xFFFF
-    IRQ -> nvic@24
+    IRQ -> nvic@25
 
 spi1: SPI.STM32SPI @ sysbus <0x40013000, +0x400>
     series: STM32Series.F4
 
 usart1: UART.STM32F7_USART @ sysbus <0x40013800, +0x400>
     frequency: 64000000
-    IRQ -> nvic@35
+    IRQ -> nvic@36
 
 tim16: Timers.STM32_Timer @ sysbus <0x40014400, +0x400>
     frequency: 64000000
     initialLimit: 0xFFFF
-    IRQ -> nvic@24
+    IRQ -> nvic@25
 
 tim17: Timers.STM32_Timer @ sysbus <0x40014800, +0x400>
     frequency: 64000000
     initialLimit: 0xFFFF
-    IRQ -> nvic@25
+    IRQ -> nvic@26
 
 sai1: Python.PythonPeripheral @ sysbus 0x40015400
     size: 0x400
     script: "if request.IsRead: request.Value = 0"
 
-dma1: DMA.STM32G0DMA @ sysbus <0x40020000, +0x400>
-    numberOfChannels: 7
+dma1: Antmicro.Renode.Peripherals.FlipperEmu.DmaWb55 @ sysbus <0x40020000, +0x400>
+    channels: 7
+    0 -> nvic@11
+    1 -> nvic@12
+    2 -> nvic@13
+    3 -> nvic@14
+    4 -> nvic@15
+    5 -> nvic@16
+    6 -> nvic@17
 
-dma2: DMA.STM32G0DMA @ sysbus <0x40020400, +0x400>
-    numberOfChannels: 7
+dma2: Antmicro.Renode.Peripherals.FlipperEmu.DmaWb55 @ sysbus <0x40020400, +0x400>
+    channels: 7
+    0 -> nvic@55
+    1 -> nvic@56
+    2 -> nvic@57
+    3 -> nvic@58
+    4 -> nvic@59
+    5 -> nvic@60
+    6 -> nvic@61
 
 dmamux1: Python.PythonPeripheral @ sysbus 0x40020800
     size: 0x400
@@ -145,12 +162,15 @@ gpioPortA: Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port @ sysbus <0x48000
 gpioPortB: Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port @ sysbus <0x48000400, +0x400>
     portName: "B"
     [2-15] -> exti@[2-15]
-    0 -> st7567@1
-    1 -> st7567@0
+    0 -> spi2bus@1
+    1 -> spi2bus@0
 
 gpioPortC: Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port @ sysbus <0x48000800, +0x400>
     portName: "C"
-    [0-15] -> exti@[0-15]
+    [0-10] -> exti@[0-10]
+    [13-15] -> exti@[13-15]
+    11 -> spi2bus@3
+    12 -> spi2bus@2
 
 gpioPortD: Antmicro.Renode.Peripherals.FlipperEmu.GpioWb55Port @ sysbus <0x48000C00, +0x400>
     portName: "D"
@@ -222,16 +242,15 @@ nvic: IRQControllers.NVIC @ sysbus <0xE000E000, +0x1000>
     systickFrequency: 64000000
     IRQ -> cpu@0
 
-dwt: Python.PythonPeripheral @ sysbus 0xE0001000
-    size: 0x1000
-    filename: "C:/Users/gtttr/auraesp32/auracumflip/src/flipper_emu/peripherals/python/dwt_fast.py"
+dwt: Antmicro.Renode.Peripherals.FlipperEmu.DwtWb55 @ sysbus <0xE0001000, +0x1000>
 
 dbgmcu: Python.PythonPeripheral @ sysbus 0xE0042000
     size: 0x400
     script: "if request.IsRead: request.Value = 0"
 
-st7567: Antmicro.Renode.Peripherals.FlipperEmu.St7567Display @ spi2
-    outputPath: "C:/Users/gtttr/auraesp32/auracumflip/artifacts/display-stream.bin"
+spi2bus: Antmicro.Renode.Peripherals.FlipperEmu.Spi2Bus @ spi2
+    panelOutputPath: "C:/Users/gtttr/auraesp32/auracumflip/artifacts/display-stream.bin"
+    cardImagePath: "C:/Users/gtttr/auraesp32/auracumflip/artifacts/sdcard-run.img"
 
 extiLowGroup: Miscellaneous.CombinedInput
     numberOfInputs: 5
@@ -262,5 +281,4 @@ sysbus:
         Tag <0x58001800, 0x58001BFF> "AES2 (stub)"
         Tag <0x58002000, 0x580023FF> "PKA (stub)"
         Tag <0xA0001000, 0xA00013FF> "QUADSPI (stub)"
-        Tag <0xE0001000, 0xE0001FFF> "DWT (stub)"
         Tag <0xE0042000, 0xE00423FF> "DBGMCU (stub)"

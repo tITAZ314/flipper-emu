@@ -153,9 +153,9 @@
       "base": 1073773568,
       "size": 1024,
       "end": 1073774592,
-      "model": "Timers.STM32L0_LpTimer",
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.LptimWb55",
       "stub": null,
-      "note": "tickless-idle wakeup timer",
+      "note": "tickless-idle wakeup timer: the stock Renode timer fired on the wrong condition",
       "status": "modelled"
     },
     {
@@ -173,9 +173,9 @@
       "base": 1073779712,
       "size": 1024,
       "end": 1073780736,
-      "model": "Timers.STM32L0_LpTimer",
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.LptimWb55",
       "stub": null,
-      "note": "",
+      "note": "second LPTIM, same model",
       "status": "modelled"
     },
     {
@@ -283,9 +283,9 @@
       "base": 1073872896,
       "size": 1024,
       "end": 1073873920,
-      "model": "DMA.STM32G0DMA",
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.DmaWb55",
       "stub": null,
-      "note": "SPI/USART transfers",
+      "note": "channel-based DMA; the per-channel IRQs (11..17, 55..61) are what the SD block reads wait on",
       "status": "modelled"
     },
     {
@@ -293,9 +293,9 @@
       "base": 1073873920,
       "size": 1024,
       "end": 1073874944,
-      "model": "DMA.STM32G0DMA",
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.DmaWb55",
       "stub": null,
-      "note": "",
+      "note": "SPI2 RX = channel 6 -> IRQ 60, TX = channel 7 -> IRQ 61 (furi_hal_spi.c)",
       "status": "modelled"
     },
     {
@@ -523,10 +523,10 @@
       "base": 3758100480,
       "size": 4096,
       "end": 3758104576,
-      "model": null,
-      "stub": "dwt_fast",
-      "note": "CYCCNT must advance fast: delays are busy-waits",
-      "status": "stubbed"
+      "model": "Antmicro.Renode.Peripherals.FlipperEmu.DwtWb55",
+      "stub": null,
+      "note": "CYCCNT steps one microsecond per read: honest deltas for furi_delay_us and the cortex timers",
+      "status": "modelled"
     },
     {
       "name": "DBGMCU",

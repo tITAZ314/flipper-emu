@@ -146,6 +146,16 @@ HSEM_MODEL = "Antmicro.Renode.Peripherals.FlipperEmu.HsemWb55"
 #: the old stub returned (`if request.IsRead: request.Value = 1`).
 RNG_MODEL = "Antmicro.Renode.Peripherals.FlipperEmu.RngWb55"
 
+#: The low-power timers, modelled rather than left to Renode's stock
+#: ``Timers.STM32L0_LpTimer``.  That model fires on its own ``LimitTimer`` limit
+#: instead of the firmware's *compare* match (it logs "Compare value (16117) cannot
+#: be greater than auto reload limit (1). Compare value will be ignored"), so it
+#: fired at the wrong time and kept re-raising LPTIM1's IRQ.  The firmware has no
+#: ISR registered for that interrupt - it polls the flags with interrupts masked -
+#: so delivery ended in ``furi_check(isr_descr->isr)`` and reset the chip 96 times
+#: in 20 s.  See docs/ISSUES_AND_LOGS.md (P24) and peripherals/cs/LptimWb55.cs.
+LPTIM_MODEL = "Antmicro.Renode.Peripherals.FlipperEmu.LptimWb55"
+
 #: Register blocks: ``(name, base, size, renode model, stub id, note)``.
 #: ``model`` names are Renode 1.17 classes; ``None`` means "served by the stub
 #: module named in the ``stub`` column until the bring-up log says otherwise".
@@ -165,9 +175,10 @@ _PERIPHERAL_TABLE: Tuple[Tuple[str, int, int, Optional[str], Optional[str], str]
     ("I2C3", 0x40005C00, 0x400, "I2C.STM32F7_I2C", None, "vibro driver LP5562"),
     ("CRS", 0x40006000, 0x400, None, "crs_stub", ""),
     ("USB1", 0x40006800, 0x400, None, "usb_stub", "USB CDC console; not needed to boot"),
-    ("LPTIM1", 0x40007C00, 0x400, "Timers.STM32L0_LpTimer", None, "tickless-idle wakeup timer"),
+    ("LPTIM1", 0x40007C00, 0x400, LPTIM_MODEL, None,
+ "tickless-idle wakeup timer: the stock Renode timer fired on the wrong condition"),
     ("LPUART1", 0x40008000, 0x400, "UART.STM32F7_USART", None, ""),
-    ("LPTIM2", 0x40009400, 0x400, "Timers.STM32L0_LpTimer", None, ""),
+    ("LPTIM2", 0x40009400, 0x400, LPTIM_MODEL, None, "second LPTIM, same model"),
     # --- APB2 (0x40010000) -------------------------------------------------
     ("SYSCFG", 0x40010000, 0x20, None, "syscfg_wb55", "EXTICR line routing + MEMRMP remap (OTA)"),
     ("VREFBUF", 0x40010030, 0x4, None, "vrefbuf_stub", ""),
@@ -181,8 +192,10 @@ _PERIPHERAL_TABLE: Tuple[Tuple[str, int, int, Optional[str], Optional[str], str]
     ("SAI1", 0x40015400, 0x400, None, "sai_stub", "I2S speaker, unused"),
 
     # --- AHB1 (0x40020000) -------------------------------------------------
-    ("DMA1", 0x40020000, 0x400, "DMA.STM32G0DMA", None, "SPI/USART transfers"),
-    ("DMA2", 0x40020400, 0x400, "DMA.STM32G0DMA", None, ""),
+    ("DMA1", 0x40020000, 0x400, "Antmicro.Renode.Peripherals.FlipperEmu.DmaWb55", None,
+     "channel-based DMA; the per-channel IRQs (11..17, 55..61) are what the SD block reads wait on"),
+    ("DMA2", 0x40020400, 0x400, "Antmicro.Renode.Peripherals.FlipperEmu.DmaWb55", None,
+     "SPI2 RX = channel 6 -> IRQ 60, TX = channel 7 -> IRQ 61 (furi_hal_spi.c)"),
     ("DMAMUX1", 0x40020800, 0x400, None, "dmamux_stub", "DMA request routing"),
     ("CRC", 0x40023000, 0x400, "CRC.STM32_CRC", None, "resource/flash checksums"),
     ("TSC", 0x40024000, 0x400, None, "tsc_stub", "unused"),
@@ -222,7 +235,8 @@ _PERIPHERAL_TABLE: Tuple[Tuple[str, int, int, Optional[str], Optional[str], str]
     ("QUADSPI", 0xA0001000, 0x400, None, "quadspi_stub", "not used by Flipper Zero"),
     # --- Cortex-M4 private -------------------------------------------------
     ("NVIC", SCS_BASE, SCS_SIZE, "IRQControllers.NVIC", None, "SysTick frequency drives firmware timing"),
-    ("DWT", DWT_BASE, DWT_SIZE, None, "dwt_fast", "CYCCNT must advance fast: delays are busy-waits"),
+    ("DWT", DWT_BASE, DWT_SIZE, "Antmicro.Renode.Peripherals.FlipperEmu.DwtWb55", None,
+     "CYCCNT steps one microsecond per read: honest deltas for furi_delay_us and the cortex timers"),
     ("DBGMCU", DBGMCU_BASE, 0x400, None, "dbgmcu_stub", ""),
 )
 

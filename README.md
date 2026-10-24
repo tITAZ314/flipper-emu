@@ -11,11 +11,7 @@ display over SPI, button GPIOs wired into EXTI, a microSD card over SPI,
 Sub-GHz (CC1101), NFC (ST25R3916), RFID comparators, IR timers, and the
 CPU2/IPCC mailbox.
 
-> **Development note:** built with heavy use of AI coding assistance
-> (Claude / Claude Code) for implementation, debugging, and documentation,
-> under my direction and review throughout. The engineering approach and
-> every decision were mine; AI was a tool in the process. Disclosed here
-> for transparency.
+
 
 ---
 
